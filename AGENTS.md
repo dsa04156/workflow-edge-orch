@@ -18,6 +18,32 @@ This project is **not** a generic cluster scheduler. It is a **workflow-aware ed
 
 ---
 
+## Current implementation status (April 2026)
+
+### ✅ Completed Milestones
+1.  **State Aggregator & Monitoring**:
+    - Central hub for Prometheus metrics and workflow events implemented.
+    - Normalized state exposure for nodes and workflows.
+2.  **GitOps & Continuous Deployment**:
+    - **ArgoCD Integration**: Automatic synchronization of control plane components.
+    - **ArgoCD Image Updater**: Automated rollout of new versions based on image digest changes.
+3.  **CI/CD Pipeline**:
+    - **GitHub Actions**: Automated multi-architecture builds (AMD64/ARM64) using `docker buildx`.
+    - **Self-hosted Runner**: Integration with local build environments and registries.
+4.  **Workflow Executor Improvements**:
+    - **Persistence**: Added SQLite-based state storage for workflow history.
+    - **Reliability**: Forced `image_pull_policy: Always` for dynamic Jobs to ensure latest AI code execution.
+5.  **Heuristic Placement Engine**:
+    - Weighted score-based placement logic for 이기종(Heterogeneous) environments.
+
+### 🚀 In Progress / Next Steps
+1.  **Registry Migration**: Transition from basic Docker registry to **Harbor** for enterprise-grade management.
+2.  **Real AI Integration**: Replacing synthetic stages with actual Vision/Inference workloads.
+3.  **Data Persistence Layer**: Implementing shared storage (Redis/MinIO) for inter-stage data passing.
+4.  **Re-planning Logic**: Implementing dynamic migration during workflow execution based on live node state.
+
+---
+
 ## Core implementation principles
 
 ### Reuse existing monitoring
