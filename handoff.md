@@ -323,6 +323,10 @@ This is the missing step before stronger evaluation claims.
 - **ArgoCD Integration**: Setup ArgoCD application manifests (`argocd-apps.yaml`) and `kustomization.yaml` for `state-aggregator`, `workflow_executor`, and `placement_engine` to allow automatic redeployments on Git changes.
 - **Image Pull Policy**: Enforced `imagePullPolicy: Always` across all statically deployed components and dynamically generated `vision_stage_runner` Jobs to avoid manual digest updates.
 - **State Persistence**: `workflow_executor` now records execution state into a local SQLite database (`workflow_state.db`) rather than keeping it solely in memory, ensuring that workflow history is not lost on executor Pod restarts.
+- **GitHub Actions CI/CD**: Established a full CI pipeline using GitHub Actions with a self-hosted runner. It performs multi-architecture builds (AMD64/ARM64) via `docker buildx` and pushes to the local registry.
+- **ArgoCD Image Updater**: Installed and configured to automatically roll out new image versions by tracking image digest changes on the `latest` tag.
+- **Traefik Ingress**: Installed Traefik as the cluster gateway. Configured `IngressRoute` (CRD) for centralized access to cluster services via `192.168.0.56`.
+- **Harbor Registry**: Initiated migration to Harbor for enterprise-grade image management (Installation via Helm in progress).
 
 ## Suggested short narrative for current milestone
 
