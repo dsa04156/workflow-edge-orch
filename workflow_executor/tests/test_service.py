@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from pathlib import Path
 
 from workflow_executor.config import Settings
 from workflow_executor.models import ExecuteStageRequest, NodeProfile, StageExecutionSpec, StageMetadata
@@ -81,7 +82,14 @@ def _sample_request() -> ExecuteStageRequest:
     )
 
 
-def test_execute_stage_creates_job_and_reports_events(monkeypatch):
+def _settings(tmp_path: Path) -> Settings:
+    return Settings(
+        data_dir=tmp_path,
+        state_db_path=tmp_path / "workflow_state.db",
+    )
+
+
+def test_execute_stage_creates_job_and_reports_events(monkeypatch, tmp_path: Path):
     sent = []
     responses = [
         DummyAsyncResponse(
@@ -104,7 +112,7 @@ def test_execute_stage_creates_job_and_reports_events(monkeypatch):
         "workflow_executor.service.httpx.AsyncClient",
         lambda **kwargs: FakeAsyncClient(responses, sent, **kwargs),
     )
-    service = WorkflowExecutorService(Settings(), batch_api=batch_api)
+    service = WorkflowExecutorService(_settings(tmp_path), batch_api=batch_api)
 
     result = asyncio.run(service.execute_stage(_sample_request()))
 
@@ -116,9 +124,13 @@ def test_execute_stage_creates_job_and_reports_events(monkeypatch):
     assert sent[0]["json"]["stage_id"] == "inference"
     assert sent[1]["json"]["event_type"] == "stage_start"
     assert sent[2]["json"]["event_type"] == "stage_end"
+    workflow = asyncio.run(service.get_workflow_state("wf-1"))
+    assert workflow.current_stage_id == "inference"
+    assert workflow.stages[0].job_name is not None
+    assert workflow.transitions[-1].status == "stage_completed"
 
 
-def test_execute_stage_reports_migration(monkeypatch):
+def test_execute_stage_reports_migration(monkeypatch, tmp_path: Path):
     sent = []
     responses = [
         DummyAsyncResponse(
@@ -142,7 +154,7 @@ def test_execute_stage_reports_migration(monkeypatch):
         "workflow_executor.service.httpx.AsyncClient",
         lambda **kwargs: FakeAsyncClient(responses, sent, **kwargs),
     )
-    service = WorkflowExecutorService(Settings(), batch_api=batch_api)
+    service = WorkflowExecutorService(_settings(tmp_path), batch_api=batch_api)
     request = _sample_request()
     request.current_placement = "etri-dev0001-jetorn"
 
@@ -150,3 +162,5 @@ def test_execute_stage_reports_migration(monkeypatch):
 
     assert sent[1]["json"]["event_type"] == "migration_event"
     assert sent[1]["json"]["from_node"] == "etri-dev0001-jetorn"
+    workflow = asyncio.run(service.get_workflow_state("wf-1"))
+    assert any(item.status == "migration_event" for item in workflow.transitions)

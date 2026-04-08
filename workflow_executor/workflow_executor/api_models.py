@@ -6,6 +6,7 @@ from .models import (
     ExecuteStageRequest,
     ExecuteWorkflowRequest,
     StageExecutionResult,
+    WorkflowRunState,
     WorkflowExecutionResult,
 )
 
@@ -18,9 +19,19 @@ class ExecuteWorkflowResponse(BaseModel):
     result: WorkflowExecutionResult
 
 
+class WorkflowStateResponse(BaseModel):
+    workflow: WorkflowRunState
+
+
+class WorkflowStateListResponse(BaseModel):
+    workflows: list[WorkflowRunState]
+
+
 __all__ = [
     "ExecuteStageRequest",
     "ExecuteStageResponse",
     "ExecuteWorkflowRequest",
     "ExecuteWorkflowResponse",
+    "WorkflowStateListResponse",
+    "WorkflowStateResponse",
 ]

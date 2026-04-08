@@ -7,6 +7,8 @@ from .api_models import (
     ExecuteStageResponse,
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
+    WorkflowStateListResponse,
+    WorkflowStateResponse,
 )
 from .config import Settings
 from .service import WorkflowExecutorService
@@ -32,3 +34,15 @@ async def execute_stage(request: ExecuteStageRequest) -> ExecuteStageResponse:
 async def execute_workflow(request: ExecuteWorkflowRequest) -> ExecuteWorkflowResponse:
     result = await service.execute_workflow(request)
     return ExecuteWorkflowResponse(result=result)
+
+
+@app.get("/workflow/{workflow_id}", response_model=WorkflowStateResponse)
+async def get_workflow(workflow_id: str) -> WorkflowStateResponse:
+    workflow = await service.get_workflow_state(workflow_id)
+    return WorkflowStateResponse(workflow=workflow)
+
+
+@app.get("/workflows", response_model=WorkflowStateListResponse)
+async def list_workflows() -> WorkflowStateListResponse:
+    workflows = await service.list_workflow_states()
+    return WorkflowStateListResponse(workflows=workflows)

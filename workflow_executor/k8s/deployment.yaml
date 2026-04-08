@@ -17,7 +17,7 @@ spec:
         kubernetes.io/hostname: etri-ser0001-cg0msb
       containers:
         - name: workflow-executor
-          image: 192.168.0.56:5000/workflow-executor@sha256:fe5087a76f069573872e3b6be26564e93423a402079bf1d16c024a44d57a78df
+          image: 192.168.0.56:5000/workflow-executor@sha256:42dfe36aa38a1f932caa8eeea6701da277b3c8a99d8d68fda9382a703f0c6d7d
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8002
@@ -28,6 +28,18 @@ spec:
               value: http://state-aggregator:8000/workflow-event
             - name: EXECUTOR_NAMESPACE
               value: default
+            - name: EXECUTOR_DATA_DIR
+              value: /app/data
+            - name: STATE_DB_PATH
+              value: /app/data/workflow_state.db
+          volumeMounts:
+            - name: workflow-executor-data
+              mountPath: /app/data
+      volumes:
+        - name: workflow-executor-data
+          hostPath:
+            path: /var/lib/workflow-executor
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service

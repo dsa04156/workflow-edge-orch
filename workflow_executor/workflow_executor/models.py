@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 ActionType = Literal["keep", "migrate", "offload_to_cloud", "reject"]
 ExecutionStatus = Literal["completed", "failed"]
+StageRunStatus = Literal["pending", "placed", "running", "completed", "failed"]
+WorkflowRunStatus = Literal["pending", "running", "completed", "failed"]
 
 
 def utc_now() -> datetime:
@@ -105,3 +107,40 @@ class WorkflowExecutionResult(BaseModel):
     workflow_id: str
     workflow_type: str
     stages: list[StageExecutionResult]
+
+
+class StageRunState(BaseModel):
+    workflow_id: str
+    workflow_type: str
+    stage_id: str
+    stage_type: str
+    status: StageRunStatus
+    assigned_node: str | None = None
+    job_name: str | None = None
+    action_type: ActionType | None = None
+    decision_reason: str | None = None
+    queue_wait_ms: int | None = None
+    exec_time_ms: int | None = None
+    transfer_time_ms: int | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime
+
+
+class WorkflowTransition(BaseModel):
+    workflow_id: str
+    stage_id: str | None = None
+    status: str
+    details: dict[str, str | int | float | None] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class WorkflowRunState(BaseModel):
+    workflow_id: str
+    workflow_type: str
+    status: WorkflowRunStatus
+    current_stage_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    stages: list[StageRunState] = Field(default_factory=list)
+    transitions: list[WorkflowTransition] = Field(default_factory=list)

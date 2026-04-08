@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 from datetime import datetime, timezone
+from fastapi import HTTPException
 
 import httpx
 from kubernetes import client
@@ -17,8 +18,10 @@ from .models import (
     StageExecutionResult,
     StageExecutionSpec,
     WorkflowEvent,
+    WorkflowRunState,
     WorkflowExecutionResult,
 )
+from .storage import WorkflowStateStore
 
 
 def _sanitize_name(value: str) -> str:
@@ -29,18 +32,54 @@ def _sanitize_name(value: str) -> str:
 class WorkflowExecutorService:
     def __init__(self, settings: Settings, batch_api: client.BatchV1Api | None = None) -> None:
         self.settings = settings
+        self.settings.data_dir.mkdir(parents=True, exist_ok=True)
         self.batch_api = batch_api or build_batch_api()
+        self.store = WorkflowStateStore(settings.state_db_path)
         self.current_placement: dict[tuple[str, str], str] = {}
 
     async def execute_stage(self, request: ExecuteStageRequest) -> StageExecutionResult:
+        previous_node = request.current_placement or await asyncio.to_thread(
+            self.store.get_stage_assignment,
+            request.workflow_id,
+            request.stage.stage_id,
+        )
+        await asyncio.to_thread(
+            self.store.ensure_workflow,
+            request.workflow_id,
+            request.workflow_type,
+        )
+        await asyncio.to_thread(
+            self.store.update_workflow_status,
+            request.workflow_id,
+            request.workflow_type,
+            "running",
+            request.stage.stage_id,
+        )
         decision = await self._decide_stage(
             workflow_id=request.workflow_id,
             workflow_type=request.workflow_type,
             stage=request.stage,
             node_profiles=[profile.model_dump() for profile in request.node_profiles],
-            current_placement=request.current_placement,
+            current_placement=previous_node,
         )
         if not decision.target_node or decision.action_type == "reject":
+            await asyncio.to_thread(
+                self.store.upsert_stage,
+                workflow_id=request.workflow_id,
+                workflow_type=request.workflow_type,
+                stage_id=request.stage.stage_id,
+                stage_type=request.stage.stage_metadata.stage_type,
+                status="failed",
+                assigned_node=previous_node,
+                decision_reason=decision.decision_reason,
+            )
+            await asyncio.to_thread(
+                self.store.append_transition,
+                request.workflow_id,
+                "stage_rejected",
+                stage_id=request.stage.stage_id,
+                details={"reason": decision.decision_reason},
+            )
             await self._send_event(
                 WorkflowEvent(
                     event_type="failure_event",
@@ -48,15 +87,32 @@ class WorkflowExecutorService:
                     workflow_type=request.workflow_type,
                     stage_id=request.stage.stage_id,
                     stage_type=request.stage.stage_metadata.stage_type,
-                    assigned_node=request.current_placement or "unassigned",
+                    assigned_node=previous_node or "unassigned",
                     reason=decision.decision_reason,
                     status="failed",
                 )
             )
+            await asyncio.to_thread(
+                self.store.update_workflow_status,
+                request.workflow_id,
+                request.workflow_type,
+                "failed",
+                request.stage.stage_id,
+            )
             raise RuntimeError(f"Stage rejected: {decision.decision_reason}")
 
-        previous_node = request.current_placement
         if previous_node and previous_node != decision.target_node:
+            await asyncio.to_thread(
+                self.store.append_transition,
+                request.workflow_id,
+                "migration_event",
+                stage_id=request.stage.stage_id,
+                details={
+                    "from_node": previous_node,
+                    "to_node": decision.target_node,
+                    "reason": decision.decision_reason,
+                },
+            )
             await self._send_event(
                 WorkflowEvent(
                     event_type="migration_event",
@@ -80,6 +136,34 @@ class WorkflowExecutorService:
             stage=request.stage,
             target_node=decision.target_node,
         )
+        started_at = datetime.now(timezone.utc)
+        await asyncio.to_thread(
+            self.store.upsert_stage,
+            workflow_id=request.workflow_id,
+            workflow_type=request.workflow_type,
+            stage_id=request.stage.stage_id,
+            stage_type=request.stage.stage_metadata.stage_type,
+            status="running",
+            assigned_node=decision.target_node,
+            job_name=job_name,
+            action_type=decision.action_type,
+            decision_reason=decision.decision_reason,
+            queue_wait_ms=request.stage.queue_wait_ms,
+            exec_time_ms=request.stage.exec_time_ms,
+            transfer_time_ms=request.stage.transfer_time_ms,
+            started_at=started_at,
+        )
+        await asyncio.to_thread(
+            self.store.append_transition,
+            request.workflow_id,
+            "stage_started",
+            stage_id=request.stage.stage_id,
+            details={
+                "assigned_node": decision.target_node,
+                "job_name": job_name,
+                "action_type": decision.action_type,
+            },
+        )
 
         await self._send_event(
             WorkflowEvent(
@@ -101,6 +185,30 @@ class WorkflowExecutorService:
         )
 
         if status != "completed":
+            await asyncio.to_thread(
+                self.store.upsert_stage,
+                workflow_id=request.workflow_id,
+                workflow_type=request.workflow_type,
+                stage_id=request.stage.stage_id,
+                stage_type=request.stage.stage_metadata.stage_type,
+                status="failed",
+                assigned_node=decision.target_node,
+                job_name=job_name,
+                action_type=decision.action_type,
+                decision_reason=decision.decision_reason,
+                queue_wait_ms=request.stage.queue_wait_ms,
+                exec_time_ms=request.stage.exec_time_ms,
+                transfer_time_ms=request.stage.transfer_time_ms,
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+            )
+            await asyncio.to_thread(
+                self.store.append_transition,
+                request.workflow_id,
+                "stage_failed",
+                stage_id=request.stage.stage_id,
+                details={"job_name": job_name},
+            )
             await self._send_event(
                 WorkflowEvent(
                     event_type="failure_event",
@@ -113,8 +221,40 @@ class WorkflowExecutorService:
                     status="failed",
                 )
             )
+            await asyncio.to_thread(
+                self.store.update_workflow_status,
+                request.workflow_id,
+                request.workflow_type,
+                "failed",
+                request.stage.stage_id,
+            )
             raise RuntimeError(f"Job {job_name} failed")
 
+        completed_at = datetime.now(timezone.utc)
+        await asyncio.to_thread(
+            self.store.upsert_stage,
+            workflow_id=request.workflow_id,
+            workflow_type=request.workflow_type,
+            stage_id=request.stage.stage_id,
+            stage_type=request.stage.stage_metadata.stage_type,
+            status="completed",
+            assigned_node=decision.target_node,
+            job_name=job_name,
+            action_type=decision.action_type,
+            decision_reason=decision.decision_reason,
+            queue_wait_ms=request.stage.queue_wait_ms,
+            exec_time_ms=request.stage.exec_time_ms,
+            transfer_time_ms=request.stage.transfer_time_ms,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        await asyncio.to_thread(
+            self.store.append_transition,
+            request.workflow_id,
+            "stage_completed",
+            stage_id=request.stage.stage_id,
+            details={"job_name": job_name, "assigned_node": decision.target_node},
+        )
         await self._send_event(
             WorkflowEvent(
                 event_type="stage_end",
@@ -141,10 +281,36 @@ class WorkflowExecutorService:
         )
 
     async def execute_workflow(self, request: ExecuteWorkflowRequest) -> WorkflowExecutionResult:
+        await asyncio.to_thread(
+            self.store.ensure_workflow,
+            request.workflow_id,
+            request.workflow_type,
+        )
+        await asyncio.to_thread(
+            self.store.update_workflow_status,
+            request.workflow_id,
+            request.workflow_type,
+            "running",
+            None,
+        )
+        await asyncio.to_thread(
+            self.store.append_transition,
+            request.workflow_id,
+            "workflow_started",
+            details={"stage_count": len(request.stages)},
+        )
         results: list[StageExecutionResult] = []
         placement = dict(request.current_placement)
 
         for stage in request.stages:
+            if stage.stage_id not in placement:
+                stored_assignment = await asyncio.to_thread(
+                    self.store.get_stage_assignment,
+                    request.workflow_id,
+                    stage.stage_id,
+                )
+                if stored_assignment:
+                    placement[stage.stage_id] = stored_assignment
             result = await self.execute_stage(
                 ExecuteStageRequest(
                     workflow_id=request.workflow_id,
@@ -159,6 +325,20 @@ class WorkflowExecutorService:
 
         last_stage = request.stages[-1]
         last_target = results[-1].target_node
+        await asyncio.to_thread(
+            self.store.update_workflow_status,
+            request.workflow_id,
+            request.workflow_type,
+            "completed",
+            last_stage.stage_id,
+        )
+        await asyncio.to_thread(
+            self.store.append_transition,
+            request.workflow_id,
+            "workflow_completed",
+            stage_id=last_stage.stage_id,
+            details={"assigned_node": last_target},
+        )
         await self._send_event(
             WorkflowEvent(
                 event_type="workflow_end",
@@ -175,6 +355,15 @@ class WorkflowExecutorService:
             workflow_type=request.workflow_type,
             stages=results,
         )
+
+    async def get_workflow_state(self, workflow_id: str) -> WorkflowRunState:
+        workflow = await asyncio.to_thread(self.store.get_workflow, workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        return workflow
+
+    async def list_workflow_states(self) -> list[WorkflowRunState]:
+        return await asyncio.to_thread(self.store.list_workflows)
 
     async def _decide_stage(
         self,
@@ -234,6 +423,7 @@ class WorkflowExecutorService:
         container = client.V1Container(
             name="stage",
             image=stage.image,
+            image_pull_policy="Always",
             command=stage.command or None,
             args=stage.args or None,
             env=env or None,
