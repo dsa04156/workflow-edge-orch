@@ -327,6 +327,11 @@ This is the missing step before stronger evaluation claims.
 - **ArgoCD Image Updater**: Installed and configured to automatically roll out new image versions by tracking image digest changes on the `latest` tag.
 - **Traefik Ingress**: Installed Traefik as the cluster gateway. Configured `IngressRoute` (CRD) for centralized access to cluster services via `192.168.0.56`.
 - **Harbor Registry**: Initiated migration to Harbor for enterprise-grade image management (Installation via Helm in progress).
+- **ArgoCD Cloud Node Pinning**: Configured `argocd-server` to run exclusively on cloud nodes using `nodeSelector: environment=cloud` for system stability.
+- **sslip.io Integration**: Established a standard domain-based access pattern using `sslip.io` for all web services, enabling consistent access across the internal network without modifying local `hosts` files.
+    - ArgoCD: `http://argocd.192.168.0.56.sslip.io`
+    - Grafana: `http://grafana.192.168.0.56.sslip.io`
+    - Prometheus: `http://prometheus.192.168.0.56.sslip.io`
 
 ## Suggested short narrative for current milestone
 
