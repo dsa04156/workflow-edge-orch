@@ -76,3 +76,4 @@ async def get_metrics() -> PlainTextResponse:
 @app.post("/internal/refresh")
 async def refresh_nodes():
     return await service.refresh_nodes()
+# trigger cd
