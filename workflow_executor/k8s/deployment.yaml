@@ -17,8 +17,8 @@ spec:
         kubernetes.io/hostname: etri-ser0001-cg0msb
       containers:
         - name: workflow-executor
-          image: 192.168.0.56:5000/workflow-executor@sha256:42dfe36aa38a1f932caa8eeea6701da277b3c8a99d8d68fda9382a703f0c6d7d
-          imagePullPolicy: IfNotPresent
+          image: 192.168.0.56:5000/workflow-executor:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8002
           env:
