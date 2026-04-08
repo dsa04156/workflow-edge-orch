@@ -19,22 +19,32 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          buildkitd-flags: --allow-insecure-entitlement 192.168.0.56:5000
+
       - name: Build and Push state-aggregator
         run: |
-          docker build -t 192.168.0.56:5000/state-aggregator:latest -f state-aggregator/Dockerfile state-aggregator
-          docker push 192.168.0.56:5000/state-aggregator:latest
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t 192.168.0.56:5000/state-aggregator:latest \
+            -f state-aggregator/Dockerfile state-aggregator --push
 
       - name: Build and Push workflow-executor
         run: |
-          docker build -t 192.168.0.56:5000/workflow-executor:latest -f workflow_executor/Dockerfile workflow_executor
-          docker push 192.168.0.56:5000/workflow-executor:latest
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t 192.168.0.56:5000/workflow-executor:latest \
+            -f workflow_executor/Dockerfile workflow_executor --push
 
       - name: Build and Push placement-engine
         run: |
-          docker build -t 192.168.0.56:5000/placement-engine:latest -f placement_engine/Dockerfile placement_engine
-          docker push 192.168.0.56:5000/placement-engine:latest
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t 192.168.0.56:5000/placement-engine:latest \
+            -f placement_engine/Dockerfile placement_engine --push
 
       - name: Build and Push vision-stage-runner
         run: |
-          docker build -t 192.168.0.56:5000/vision-stage-runner:latest -f vision_stage_runner/Dockerfile vision_stage_runner
-          docker push 192.168.0.56:5000/vision-stage-runner:latest
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t 192.168.0.56:5000/vision-stage-runner:latest \
+            -f vision_stage_runner/Dockerfile vision_stage_runner --push
