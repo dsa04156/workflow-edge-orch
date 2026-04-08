@@ -292,9 +292,9 @@ kubectl get --raw '/api/v1/namespaces/kube-system/services/http:prometheus-kube-
 
 ## Recommended next steps
 
-1. Replace synthetic `vision_stage_runner` stage specs with real stage container images and commands.
+1. Replace synthetic `vision_stage_runner` stage specs with real stage container images and commands (Wait on Data passing layer like Redis/MinIO first).
 
-2. Move from per-request in-memory placement tracking to explicit persisted workflow execution state.
+2. ~~Move from per-request in-memory placement tracking to explicit persisted workflow execution state.~~ (Done: Added SQLite-based state persistence to `workflow_executor`).
 
 3. Add real `replan` flow:
 - consult `placement/replan`
@@ -305,6 +305,7 @@ kubectl get --raw '/api/v1/namespaces/kube-system/services/http:prometheus-kube-
 Examples:
 - `GET /workflow/{workflow_id}`
 - `GET /runs`
+(Note: Internal state storage is ready, just needs API routes exposed).
 
 5. Introduce a dedicated `ServiceAccount` for `workflow_executor`.
 
@@ -313,10 +314,15 @@ Examples:
 - CRD/operator style
 - queue-backed workflow execution
 
-7. Pin `vision-stage-runner` in the executor request by digest instead of `latest`.
+7. ~~Pin `vision-stage-runner` in the executor request by digest instead of `latest`.~~ (Done: Changed all dynamic and static deployments to `imagePullPolicy: Always` and integrated with ArgoCD Image Updater for continuous latest tag sync).
 
 8. Add a real overload scenario for experiments.
 This is the missing step before stronger evaluation claims.
+
+## Latest Updates (April 2026)
+- **ArgoCD Integration**: Setup ArgoCD application manifests (`argocd-apps.yaml`) and `kustomization.yaml` for `state-aggregator`, `workflow_executor`, and `placement_engine` to allow automatic redeployments on Git changes.
+- **Image Pull Policy**: Enforced `imagePullPolicy: Always` across all statically deployed components and dynamically generated `vision_stage_runner` Jobs to avoid manual digest updates.
+- **State Persistence**: `workflow_executor` now records execution state into a local SQLite database (`workflow_state.db`) rather than keeping it solely in memory, ensuring that workflow history is not lost on executor Pod restarts.
 
 ## Suggested short narrative for current milestone
 
@@ -327,6 +333,8 @@ Current repository state supports:
 - heuristic stage placement
 - actual Kubernetes stage execution from placement decisions
 - mixed-architecture stage execution with a multi-arch stage image
+- **Persistent execution state tracking**
+- **GitOps-driven continuous deployment via ArgoCD**
 
 This is now a working prototype of a workflow-aware, state-aware, heterogeneity-aware edge offloading control plane.
 It is still an early prototype and not yet a full runtime migration system.
