@@ -8,6 +8,7 @@ from .models import NodeState, SummaryState, WorkflowEvent, WorkflowState
 from .normalizer import build_summary, normalize_node_state, normalize_workflow_state
 from .prometheus import PrometheusClient
 from .storage import StateStore
+from .kube import KubeClient
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,11 @@ logger = logging.getLogger(__name__)
 class StateAggregatorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Keep fallback instance map for now, but it will be overridden by KubeClient
         self.instance_map = load_instance_map(settings.instance_map_path)
         self.store = StateStore(settings.data_dir)
         self.prometheus = PrometheusClient(settings.prometheus_url, self.instance_map)
+        self.kube = KubeClient()
         self._poller_task: asyncio.Task | None = None
 
     async def start(self) -> None:
@@ -43,6 +46,11 @@ class StateAggregatorService:
             await asyncio.sleep(self.settings.poll_interval_seconds)
 
     async def refresh_nodes(self) -> list[NodeState]:
+        # Dynamically discover nodes from K8s API
+        new_map = await self.kube.get_node_map()
+        if new_map:
+            self.prometheus.instance_map = new_map
+            
         raw_nodes = await self.prometheus.collect_node_metrics()
         states = [normalize_node_state(item) for item in raw_nodes]
         for state in states:

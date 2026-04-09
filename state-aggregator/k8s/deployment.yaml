@@ -14,6 +14,7 @@ spec:
       labels:
         app: state-aggregator
     spec:
+      serviceAccountName: state-aggregator
       nodeSelector:
         kubernetes.io/hostname: etri-ser0001-cg0msb
       containers:
