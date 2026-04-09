@@ -59,16 +59,16 @@ We have moved away from hardcoded digests to a **Tag-based Tracking** strategy.
 
 1. **Migration**: No live checkpoint-based migration; moves occur at stage boundaries.
 2. **Synthetic Payload**: Stages currently run synthetic logic (hash loops) rather than real AI models.
-3. **Registry**: Currently using basic Docker registry (Harbor migration in progress).
+3. **Registry**: Currently using basic Docker registry.
 
 ## Recommended next steps
 
-1. **Harbor Completion**: Finalize Harbor setup and point CI/CD pipelines to it.
-2. **Data Persistence Layer**: Implement **Redis** or **MinIO** for sharing image data between stages.
-3. `Real AI Integration`: Replace `vision_stage_runner` loops with actual ONNX/PyTorch inference code.
-4. **Overload Scenarios**: Create experiment scripts to trigger intentional node/network stress for evaluation.
+1. **Data Persistence Layer**: Implement **Redis** or **MinIO** for sharing image data between stages.
+2. **Real AI Integration**: Replace `vision_stage_runner` loops with actual ONNX/PyTorch inference code.
+3. **Overload Scenarios**: Create experiment scripts to trigger intentional node/network stress for evaluation.
 
 ## Latest Updates (April 2026)
 - **ArgoCD Cloud Node Pinning**: `argocd-server` is now pinned to cloud nodes (`environment=cloud`).
 - **sslip.io Integration**: All web UIs (ArgoCD, Grafana, Prometheus) are accessible via `http://<service>.<ip>.sslip.io`.
 - **CI/CD Automation**: Full E2E automation from `git push` to live deployment rollout is verified.
+- **Cluster Expansion**: Added a new standard Kubernetes worker node (`etri-ser0002-cgnmsb`, `amd64`) to the cloud tier, increasing capacity for heavy AI inference and control plane redundancy.

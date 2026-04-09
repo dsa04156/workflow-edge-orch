@@ -37,11 +37,9 @@ This project is **not** a generic cluster scheduler. It is a **workflow-aware ed
     - Weighted score-based placement logic for 이기종(Heterogeneous) environments.
 
 ### 🚀 In Progress / Next Steps
-1.  **Registry Direction**: Keep the existing Docker registry as the active registry solution for now.
-    Harbor-related work is exploratory only and must not replace the current registry unless explicitly requested.
-2.  **Real AI Integration**: Replacing synthetic stages with actual Vision/Inference workloads.
-3.  **Data Persistence Layer**: Implementing shared storage (Redis/MinIO) for inter-stage data passing.
-4.  **Re-planning Logic**: Implementing dynamic migration during workflow execution based on live node state.
+1.  **Real AI Integration**: Replacing synthetic stages with actual Vision/Inference workloads.
+2.  **Data Persistence Layer**: Implementing shared storage (Redis/MinIO) for inter-stage data passing.
+3.  **Re-planning Logic**: Implementing dynamic migration during workflow execution based on live node state.
 
 ---
 
@@ -89,18 +87,29 @@ The main components to implement are:
 
 ## Current node roles
 
-### Server
-- hostname: `etri-ser0001-CG0MSB`
+### Server 1 (Control Plane)
+- hostname: `etri-ser0001-cg0msb`
 - role: `cloud_server`
+- arch: `amd64`
 - preferred for:
   - heavy inference
   - centralized state aggregation
   - placement engine
   - planner candidate
 
+### Server 2 (Worker Node)
+- hostname: `etri-ser0002-cgnmsb`
+- role: `cloud_worker`
+- arch: `amd64`
+- preferred for:
+  - heavy inference
+  - redundant control plane services
+  - large-scale preprocessing
+
 ### Jetson
 - hostname: `etri-dev0001-jetorn`
 - role: `edge_ai_device`
+- arch: `arm64`
 - preferred for:
   - edge inference
   - preprocess
@@ -109,6 +118,7 @@ The main components to implement are:
 ### Raspberry Pi 5
 - hostname: `etri-dev0002-raspi5`
 - role: `edge_light_device`
+- arch: `arm64`
 - preferred for:
   - capture
   - preprocessing
