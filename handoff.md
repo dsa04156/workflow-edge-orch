@@ -26,6 +26,7 @@ The current system supports:
 
 ### 1. `state_aggregator`
 - Periodic Prometheus polling & node metric normalization.
+- **Dynamic Node Discovery**: Replaced static `instance_map.json` with a real-time Kubernetes API discovery mechanism (`KubeClient`) to automatically detect new nodes and their roles.
 - Workflow event ingestion & summary state generation.
 - `/metrics` endpoint for Prometheus scraping.
 
@@ -72,3 +73,4 @@ We have moved away from hardcoded digests to a **Tag-based Tracking** strategy.
 - **sslip.io Integration**: All web UIs (ArgoCD, Grafana, Prometheus) are accessible via `http://<service>.<ip>.sslip.io`.
 - **CI/CD Automation**: Full E2E automation from `git push` to live deployment rollout is verified.
 - **Cluster Expansion**: Added a new standard Kubernetes worker node (`etri-ser0002-cgnmsb`, `amd64`) to the cloud tier, increasing capacity for heavy AI inference and control plane redundancy.
+- **Automated Node Discovery**: Replaced static JSON configuration in `state-aggregator` with a dynamic Kubernetes API watcher to handle cluster scaling without manual updates.
