@@ -43,17 +43,10 @@ class WorkflowExecutorService:
             request.workflow_id,
             request.stage.stage_id,
         )
-        await asyncio.to_thread(
-            self.store.ensure_workflow,
-            request.workflow_id,
-            request.workflow_type,
-        )
-        await asyncio.to_thread(
-            self.store.update_workflow_status,
-            request.workflow_id,
-            request.workflow_type,
-            "running",
-            request.stage.stage_id,
+        await self._mark_stage_running(
+            workflow_id=request.workflow_id,
+            workflow_type=request.workflow_type,
+            stage_id=request.stage.stage_id,
         )
         decision = await self._decide_stage(
             workflow_id=request.workflow_id,
@@ -62,6 +55,19 @@ class WorkflowExecutorService:
             node_profiles=[profile.model_dump() for profile in request.node_profiles],
             current_placement=previous_node,
         )
+        return await self._execute_stage_with_decision(
+            request=request,
+            decision=decision,
+            previous_node=previous_node,
+        )
+
+    async def _execute_stage_with_decision(
+        self,
+        *,
+        request: ExecuteStageRequest,
+        decision: PlacementDecision,
+        previous_node: str | None,
+    ) -> StageExecutionResult:
         if not decision.target_node or decision.action_type == "reject":
             await asyncio.to_thread(
                 self.store.upsert_stage,
@@ -300,9 +306,9 @@ class WorkflowExecutorService:
             details={"stage_count": len(request.stages)},
         )
         results: list[StageExecutionResult] = []
-        placement = dict(request.current_placement)
+        placement: dict[str, str] = dict(request.current_placement)
 
-        for stage in request.stages:
+        for index, stage in enumerate(request.stages):
             if stage.stage_id not in placement:
                 stored_assignment = await asyncio.to_thread(
                     self.store.get_stage_assignment,
@@ -311,15 +317,66 @@ class WorkflowExecutorService:
                 )
                 if stored_assignment:
                     placement[stage.stage_id] = stored_assignment
-            result = await self.execute_stage(
-                ExecuteStageRequest(
+
+            remaining_stages = request.stages[index:]
+            planned_decision: PlacementDecision | None = None
+            try:
+                replanned_decisions = await self._replan_remaining_stages(
                     workflow_id=request.workflow_id,
                     workflow_type=request.workflow_type,
-                    stage=stage,
-                    node_profiles=request.node_profiles,
-                    current_placement=placement.get(stage.stage_id),
+                    stages=remaining_stages,
+                    node_profiles=[profile.model_dump() for profile in request.node_profiles],
+                    current_placement=placement,
                 )
+            except (httpx.HTTPError, ValueError) as exc:
+                await asyncio.to_thread(
+                    self.store.append_transition,
+                    request.workflow_id,
+                    "workflow_replan_failed",
+                    stage_id=stage.stage_id,
+                    details={
+                        "remaining_stage_count": len(remaining_stages),
+                        "reason": str(exc),
+                    },
+                )
+            else:
+                replanned_by_stage = {
+                    decision.stage_id: decision for decision in replanned_decisions
+                }
+                planned_decision = replanned_by_stage.get(stage.stage_id)
+            current_stage_placement = placement.get(stage.stage_id)
+            stage_request = ExecuteStageRequest(
+                workflow_id=request.workflow_id,
+                workflow_type=request.workflow_type,
+                stage=stage,
+                node_profiles=request.node_profiles,
+                current_placement=current_stage_placement,
             )
+
+            if planned_decision is not None:
+                await self._mark_stage_running(
+                    workflow_id=request.workflow_id,
+                    workflow_type=request.workflow_type,
+                    stage_id=stage.stage_id,
+                )
+                await asyncio.to_thread(
+                    self.store.append_transition,
+                    request.workflow_id,
+                    "workflow_replanned",
+                    stage_id=stage.stage_id,
+                    details={
+                        "remaining_stage_count": len(remaining_stages),
+                        "selected_target": planned_decision.target_node,
+                        "selected_action": planned_decision.action_type,
+                    },
+                )
+                result = await self._execute_stage_with_decision(
+                    request=stage_request,
+                    decision=planned_decision,
+                    previous_node=placement.get(stage.stage_id),
+                )
+            else:
+                result = await self.execute_stage(stage_request)
             placement[stage.stage_id] = result.target_node
             results.append(result)
 
@@ -365,6 +422,26 @@ class WorkflowExecutorService:
     async def list_workflow_states(self) -> list[WorkflowRunState]:
         return await asyncio.to_thread(self.store.list_workflows)
 
+    async def _mark_stage_running(
+        self,
+        *,
+        workflow_id: str,
+        workflow_type: str,
+        stage_id: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self.store.ensure_workflow,
+            workflow_id,
+            workflow_type,
+        )
+        await asyncio.to_thread(
+            self.store.update_workflow_status,
+            workflow_id,
+            workflow_type,
+            "running",
+            stage_id,
+        )
+
     async def _decide_stage(
         self,
         *,
@@ -396,6 +473,39 @@ class WorkflowExecutorService:
                 json=event.model_dump(mode="json"),
             )
             response.raise_for_status()
+
+    async def _replan_remaining_stages(
+        self,
+        *,
+        workflow_id: str,
+        workflow_type: str,
+        stages: list[StageExecutionSpec],
+        node_profiles: list[dict],
+        current_placement: dict[str, str],
+        ) -> list[PlacementDecision]:
+        async with httpx.AsyncClient(timeout=10.0) as client_http:
+            response = await client_http.post(
+                f"{self.settings.placement_engine_url.rstrip('/')}/placement/replan",
+                json={
+                    "workflow_id": workflow_id,
+                    "workflow_type": workflow_type,
+                    "stages": [
+                        {
+                            "stage_id": stage.stage_id,
+                            "stage_metadata": stage.stage_metadata.model_dump(),
+                        }
+                        for stage in stages
+                    ],
+                    "node_profiles": node_profiles,
+                    "current_placement": current_placement,
+                },
+            )
+            response.raise_for_status()
+        payload = response.json()
+        decisions = payload.get("decisions")
+        if not isinstance(decisions, list):
+            raise ValueError("placement/replan response missing decisions list")
+        return [PlacementDecision(**item) for item in decisions]
 
     def _create_job(
         self,

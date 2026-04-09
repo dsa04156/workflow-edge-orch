@@ -22,3 +22,4 @@ workflow_reporter/workflow_reporter_fallback.jsonl
 
 .mypy_cache/
 .ruff_cache/
+.omx/

@@ -37,7 +37,8 @@ This project is **not** a generic cluster scheduler. It is a **workflow-aware ed
     - Weighted score-based placement logic for 이기종(Heterogeneous) environments.
 
 ### 🚀 In Progress / Next Steps
-1.  **Registry Migration**: Transition from basic Docker registry to **Harbor** for enterprise-grade management.
+1.  **Registry Direction**: Keep the existing Docker registry as the active registry solution for now.
+    Harbor-related work is exploratory only and must not replace the current registry unless explicitly requested.
 2.  **Real AI Integration**: Replacing synthetic stages with actual Vision/Inference workloads.
 3.  **Data Persistence Layer**: Implementing shared storage (Redis/MinIO) for inter-stage data passing.
 4.  **Re-planning Logic**: Implementing dynamic migration during workflow execution based on live node state.
