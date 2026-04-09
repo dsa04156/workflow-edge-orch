@@ -1,40 +1,52 @@
-# Architecture
+# 아키텍처
 
-## 1. Nodes and roles
+## 1. 노드와 역할
 
-### Server node
+### 서버 1
 - hostname: `etri-ser0001-CG0MSB`
 - role: `cloud_server`
+- arch: `amd64`
 - preferred for:
   - heavy inference
   - centralized state aggregation
   - placement engine
   - planner candidate
 
-### Jetson node
+### 서버 2
+- hostname: `etri-ser0002-CGNMSB`
+- role: `cloud_worker`
+- arch: `amd64`
+- preferred for:
+  - heavy inference
+  - large-scale preprocessing
+  - redundant execution capacity
+
+### Jetson 노드
 - hostname: `etri-dev0001-jetorn`
 - role: `edge_ai_device`
+- arch: `arm64`
 - preferred for:
   - edge inference
   - preprocess
   - latency-sensitive stages
 
-### Raspberry Pi 5 node
+### Raspberry Pi 5 노드
 - hostname: `etri-dev0002-raspi5`
 - role: `edge_light_device`
+- arch: `arm64`
 - preferred for:
   - capture
-  - preprocessing
+  - lightweight preprocess
   - sensor ingestion
   - lightweight postprocess
 
 ---
 
-## 2. Node profile schema
+## 2. 노드 프로파일 스키마
 
-Each node should be represented by a fixed capability profile.
+각 노드는 고정된 capability profile로 표현한다.
 
-Example fields:
+예시 필드:
 - `hostname`
 - `node_type`
 - `arch`
@@ -45,7 +57,7 @@ Example fields:
 - `preferred_workload`
 - `risky_workload`
 
-Example:
+예시:
 
 ```json
 {
@@ -59,358 +71,183 @@ Example:
   "preferred_workload": ["edge_inference", "preprocess", "latency_sensitive_stage"],
   "risky_workload": ["large_model_serving", "many_concurrent_workflows", "central_planner"]
 }
-
-3. state_aggregator
-Purpose
-
-Central state hub that:
-
-reads node metrics from Prometheus
-receives workflow/stage events
-builds normalized orchestration state
-exposes lightweight APIs for placement logic
-Deployment
-Kubernetes Deployment
-server node preferred
-Inputs
-A. From Prometheus
-
-Minimum queries:
-
-node health (up)
-CPU utilization
-memory usage ratio
-load average
-network RX/TX rate
-B. From workflow_reporter
-
-Minimum events:
-
-stage_start
-stage_end
-migration_event
-workflow_end
-failure_event
-Outputs
-
-Must provide:
-
-GET /state/nodes
-GET /state/node/{hostname}
-GET /state/workflows
-GET /state/workflow/{workflow_id}
-GET /state/summary
-Internal storage
-
-Initial version:
-
-latest state in memory
-raw logs in JSONL
-
-Suggested files:
-
-data/node_state.jsonl
-data/workflow_event.jsonl
-instance mapping
-
-Prometheus instance values must be mapped to logical hostnames via config file.
-
-Suggested path:
-
-app/config/instance_map.json
-4. workflow_reporter
-Purpose
-
-Emit workflow and stage execution events to the aggregator.
-
-Form
-
-Initial version should be a Python helper module.
-
-Minimum helper functions
-report_stage_start(...)
-report_stage_end(...)
-report_migration(...)
-report_failure(...)
-Destination
-POST /workflow-event
-Minimum event fields
-event_type
-timestamp
-workflow_id
-workflow_type
-stage_id
-stage_type
-assigned_node
-
-Optional fields:
-
-exec_time_ms
-queue_wait_ms
-transfer_time_ms
-from_node
-to_node
-reason
-status
-5. placement_engine
-Purpose
-
-Decide where a workflow stage should run.
-
-Form
-
-Initial version should be a Python module, not a full service.
-
-Inputs
-node profile
-current node state
-workflow stage metadata
-current placement
-Outputs
-
-Decision object:
-
-workflow_id
-stage_id
-target_node
-decision_reason
-action_type
-
-action_type can be:
-
-keep
-migrate
-offload_to_cloud
-reject
-Initial decision rules
-heavy inference -> server preferred
-source-near stage -> Raspberry Pi preferred
-GPU-required stage -> server or Jetson only
-high memory pressure node -> do not assign new heavy stages
-unavailable node -> never place
-overload -> suggest sibling edge redistribution or cloud offload
-Initial implementation style
-heuristic / weighted score only
-no RL
-no LLM
-6. Normalized state model
-Node-level normalized state
-compute_pressure: low / medium / high
-memory_pressure: low / medium / high
-network_pressure: low / medium / high
-node_health: healthy / degraded / unavailable
-Workflow-level normalized state
-workflow_urgency
-sla_risk
-placement_stability
-
-These states are created inside state_aggregator.
-
-7. Monitoring path vs control path
-Monitoring path
-Prometheus
-Grafana
-raw JSONL logs
-Control path
-state_aggregator APIs
-placement_engine
-later: agent-assisted planner
-
-Prometheus/Grafana are not the control plane.
-They are monitoring infrastructure.
-
-8. What not to build first
-
-Do not build first:
-
-custom node collector replacing Prometheus
-full HA storage
-RL-based scheduler
-full LLM-based orchestration
-generic Kubernetes scheduler replacement
+```
 
 ---
 
-## 4) `docs/experiments.md`
+## 3. `state_aggregator`
 
-```md
-# Experiments
+### 목적
+다음 역할을 수행하는 중앙 상태 허브다.
 
-## 1. Evaluation goal
+- Prometheus에서 노드 메트릭을 읽는다.
+- 워크플로우/단계 이벤트를 수신한다.
+- 오케스트레이션용 정규화 상태를 만든다.
+- 배치 로직이 사용할 경량 API를 제공한다.
 
-The evaluation should show that a workflow-aware, state-aware, heterogeneity-aware orchestration layer can improve runtime behavior in a mixed-device edge environment.
+### 배포 형태
+- Kubernetes Deployment
+- 서버 노드 배치 우선
 
-The target outcomes are:
-- lower end-to-end latency
-- lower p95/p99 latency
-- better resource utilization
-- more stable placement under changing conditions
-- reasonable migration overhead
+### 입력
+#### A. Prometheus 기반 메트릭
+최소 질의 항목:
 
----
-
-## 2. Target workload
-
-Start with exactly one real workflow.
-
-Recommended first options:
-1. vision inference pipeline
-2. sensor/time-series anomaly detection pipeline
-
-Preferred starting point:
-- one workflow only
-- 3 to 5 stages
-
-Example workflow:
-- capture
-- preprocess
-- inference
-- postprocess
-- result delivery
-
----
-
-## 3. Baselines
-
-Prepare the following baselines:
-
-### Baseline A: static placement
-- fixed stage placement
-- no runtime migration
-- no replanning
-
-### Baseline B: heuristic placement only
-- placement by fixed rules
-- no runtime replanning
-
-### Baseline C: heuristic placement + replanning
-- runtime migration allowed
-- no agent-assisted planning
-
-### Proposed later: heuristic + agent-assisted planning
-- planner only when replanning is needed
-
----
-
-## 4. Metrics to collect
-
-### Node-level
-- CPU utilization
-- memory usage ratio
+- 노드 상태 `up`
+- CPU 사용률
+- 메모리 사용 비율
 - load average
-- network receive/transmit rate
-- node availability
+- 네트워크 RX/TX 속도
 
-### Workflow-level
-- stage execution time
-- stage queue wait time
-- stage transfer time
-- end-to-end latency
-- migration count
-- failure count
-- SLA violation count
+#### B. workflow_reporter 기반 이벤트
+최소 이벤트:
 
-### System-level
-- average latency
-- p95 latency
-- p99 latency
-- makespan
-- throughput
-- resource utilization
-- migration overhead
-- recovery time
+- `stage_start`
+- `stage_end`
+- `migration_event`
+- `workflow_end`
+- `failure_event`
 
----
+### 출력 API
+반드시 제공해야 하는 API:
 
-## 5. Experiment scenarios
+- `GET /state/nodes`
+- `GET /state/node/{hostname}`
+- `GET /state/workflows`
+- `GET /state/workflow/{workflow_id}`
+- `GET /state/summary`
+- `POST /workflow-event`
 
-### Scenario 1: normal workload
-Goal:
-- verify baseline behavior
-- ensure all stages run correctly
+### 내부 저장 방식
+초기 버전 기준:
 
-### Scenario 2: burst workload
-Goal:
-- evaluate whether overload is detected
-- evaluate whether migration/offloading helps
+- 최신 상태는 메모리 유지
+- 원시 로그는 JSONL 저장
 
-### Scenario 3: specific node overload
-Goal:
-- overload one node intentionally
-- verify replanning logic
+예시 파일:
 
-### Scenario 4: network bottleneck
-Goal:
-- reduce effective network quality
-- evaluate if source-near or alternative placement becomes better
+- `data/node_state.jsonl`
+- `data/workflow_event.jsonl`
 
-### Scenario 5: node failure or degraded performance
-Goal:
-- observe recovery or fallback behavior
-- verify unavailable node handling
+### 인스턴스 매핑
+Prometheus `instance` 값은 논리적 hostname으로 매핑해야 한다.
+
+권장 경로:
+
+- `app/config/instance_map.json`
 
 ---
 
-## 6. Required logs
+## 4. `workflow_reporter`
 
-Store the following for every experiment:
-- workflow start time
-- workflow end time
-- stage start/end events
-- migration events
-- planner-related events (later)
-- node-level utilization snapshots
-- experiment configuration
-- timestamps for all records
+### 목적
+워크플로우와 단계 실행 이벤트를 aggregator로 전달한다.
 
-Suggested format:
-- JSONL
-- CSV for summary tables
+### 구현 형태
+초기 버전은 Python helper/module로 구현한다.
 
-Suggested file layout:
-- `logs/<experiment-id>/node_state.jsonl`
-- `logs/<experiment-id>/workflow_event.jsonl`
-- `logs/<experiment-id>/config.json`
+### 최소 helper 함수 예시
+- `report_stage_start(...)`
+- `report_stage_end(...)`
+- `report_migration(...)`
+- `report_failure(...)`
 
----
+### 전송 대상
+- `POST /workflow-event`
 
-## 7. What to prove in the first milestone
+### 최소 이벤트 필드
+- `event_type`
+- `timestamp`
+- `workflow_id`
+- `workflow_type`
+- `stage_id`
+- `stage_type`
+- `assigned_node`
 
-The first milestone does not need to prove full agent-assisted orchestration.
-
-It only needs to prove:
-1. node state can be read reliably from Prometheus
-2. workflow events can be captured reliably
-3. node state + workflow state can be merged
-4. normalized orchestration state can be generated
-5. a simple heuristic placement decision can be made from that state
-
----
-
-## 8. Later planner evaluation
-
-When the agent-assisted planner is added later, evaluate:
-
-- number of planner calls
-- planner latency
-- planner acceptance/rejection rate
-- whether planner suggestions improve p95 latency or stability
-- whether planner overhead is justified
-
-Planner evaluation is not required for the first implementation milestone.
+### 선택 필드
+- `exec_time_ms`
+- `queue_wait_ms`
+- `transfer_time_ms`
+- `from_node`
+- `to_node`
+- `reason`
+- `status`
 
 ---
 
-## 9. Reviewer-facing positioning
+## 5. `placement_engine`
 
-### What to claim
-- workflow-aware orchestration
-- state-aware offloading
-- heterogeneity-aware runtime control
-- practical mixed-device edge orchestration
+### 목적
+워크플로우 단계가 어디서 실행되어야 하는지 결정한다.
 
-### What not to overclaim
-- do not claim a full autonomous agentic system
-- do not claim a replacement for Prometheus/Grafana
-- do not claim a replacement for generic Kubernetes scheduling
-- do not claim RL or LLM necessity in the first milestone
+### 구현 형태
+초기 버전은 독립 서비스가 아니라 Python 모듈로 구현한다.
+
+### 입력
+- 노드 profile
+- 현재 노드 상태
+- 워크플로우 단계 메타데이터
+- 현재 배치 상태
+
+### 출력
+결정 객체 예시:
+
+- `workflow_id`
+- `stage_id`
+- `target_node`
+- `decision_reason`
+- `action_type`
+
+`action_type` 예시:
+
+- `keep`
+- `migrate`
+- `offload_to_cloud`
+- `reject`
+
+### 초기 판단 규칙
+- heavy inference는 서버 우선
+- 데이터 소스 인접 단계는 Raspberry Pi 우선
+- GPU 필요 단계는 서버 또는 Jetson만 허용
+- 메모리 압박이 높은 노드에는 무거운 단계를 추가 배치하지 않음
+- 사용 불가 노드는 절대 선택하지 않음
+- 과부하 시 sibling edge 재분산 또는 cloud offloading을 검토
+
+### 초기 구현 원칙
+- heuristic / weighted score 우선
+- RL 사용 금지
+- LLM 기반 제어 금지
+
+---
+
+## 6. 정규화 상태 모델
+
+### 노드 수준 상태
+- `compute_pressure`: `low` / `medium` / `high`
+- `memory_pressure`: `low` / `medium` / `high`
+- `network_pressure`: `low` / `medium` / `high`
+- `node_health`: `healthy` / `degraded` / `unavailable`
+
+### 워크플로우 수준 상태
+- `workflow_urgency`
+- `sla_risk`
+- `placement_stability`
+
+이 상태는 `state_aggregator` 내부에서 생성한다.
+
+---
+
+## 7. 모니터링 경로와 제어 경로
+
+### 모니터링 경로
+- Prometheus
+- Grafana
+- JSONL 원시 로그
+
+### 제어 경로
+- `state_aggregator` API
+- `placement_engine`
+- 이후 선택적으로 `agent_assisted_planner`
+
+Prometheus와 Grafana는 제어 평면이 아니다.
+이들은 모니터링 인프라다.
